@@ -3,13 +3,13 @@ name = "hyrule"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-description = "A command-line tool."
+description = "A prompt library for agentic coding, rendered into the projects that use it."
 authors = ["Oddur Sigurdsson <oddurs@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/oddurs/hyrule"
 readme = "README.md"
-keywords = ["cli"]
-categories = ["command-line-utilities"]
+keywords = ["cli", "prompts", "claude", "agents", "llm"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

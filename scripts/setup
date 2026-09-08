@@ -9,6 +9,18 @@ cd "$(git rev-parse --show-toplevel)"
 info 'wiring git hooks to .githooks'
 git config core.hooksPath .githooks
 
+# .gitattributes routes ROADMAP.md and the item files through cairn's merge
+# driver, but a driver is local configuration that git will not clone. Without
+# this, git falls back to its ordinary merge and the roadmap conflicts.
+if command -v cairn >/dev/null 2>&1; then
+    info 'registering the cairn merge driver'
+    git config merge.cairn.name 'cairn generated files'
+    git config merge.cairn.driver 'cairn merge-driver %A %O %B %P'
+else
+    warn 'cairn is not installed; the backlog in cairn/ will merge without its
+      driver and ROADMAP.md may conflict. See https://github.com/oddurs/cairn'
+fi
+
 if command -v rustup >/dev/null 2>&1; then
     info 'installing the pinned toolchain and its components'
     rustup show active-toolchain >/dev/null
