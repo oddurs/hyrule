@@ -85,6 +85,23 @@ scripts/task check   # fmt:check, lint (warnings denied), test, build
 runs the same `scripts/task check`. Do not reach for `--no-verify`; if a hook
 is wrong, fix the hook in its own pull request.
 
+## The backlog
+
+The roadmap and issues live in this repository as Markdown under `cairn/items`,
+managed with [cairn](https://github.com/oddurs/cairn). `ROADMAP.md` is
+generated from them.
+
+```sh
+cairn next          # what is ready to pick up
+cairn show 15       # one item in full
+cairn claim 15      # take it, so nobody duplicates the work
+cairn check         # validate; run before you open a pull request
+```
+
+cairn is optional: without it the repository still builds and tests, you just
+cannot edit the backlog. Please do not hand-edit `ROADMAP.md` — change the
+items and let `cairn render` produce it.
+
 ## Review
 
 This is currently a solo repository, so branch protection requires **zero**

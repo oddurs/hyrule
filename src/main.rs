@@ -2,7 +2,7 @@ use clap::Parser;
 
 use hyrule::greeting;
 
-/// A command-line tool.
+/// A prompt library for agentic coding, rendered into the projects that use it.
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Keeps the backlog coherent after a merge.
+#
+# Item ids are allocated as one more than the highest in use, which no branch
+# can know, so two branches can each create the same id. Git merges both files
+# cleanly — the filenames differ — and leaves a project that fails `cairn
+# check`. This runs once the merge is settled: renumber any collision, then
+# re-derive ROADMAP.md from whatever is actually there.
+#
+# cairn is optional. Contributors who do not have it installed still get a
+# working repository; they just do not get the repair.
+set -eu
+
+command -v cairn >/dev/null 2>&1 || exit 0
+
+cd "$(git rev-parse --show-toplevel)"
+
+cairn renumber --quiet
+cairn render --quiet
+
+# A hook cannot politely amend the merge commit, so anything it changed is left
+# in the working tree for a person to look at and commit.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    printf 'cairn: the merge changed identifiers or the roadmap; review and commit:\n'
+    git status --short | sed 's/^/  /'
+fi

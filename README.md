@@ -3,43 +3,46 @@
 [![CI](https://github.com/oddurs/hyrule/actions/workflows/ci.yml/badge.svg)](https://github.com/oddurs/hyrule/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A command-line tool, written in Rust.
+A prompt library for agentic coding, rendered into the projects that use it.
 
-## What it does today
+## The problem
 
-`hyrule` is early. The binary takes an optional name and prints a greeting:
+You write the same instructions to a coding agent over and over. Not because
+you enjoy it — because there is nowhere to put them. So each repository gets
+its own slightly different `CLAUDE.md`, its own slightly different slash
+commands, and six months later you have eight variants of the same house style
+and no idea which one is right.
 
-```console
-$ hyrule
-Hello, world!
+Copying prompts between projects fixes the typing. It does not fix the drift.
 
-$ hyrule Link
-Hello, Link!
-```
+## The idea
 
-That is the whole of the current behaviour. What is finished is everything
-*around* the binary: a single command that runs every check, git hooks that
-refuse a bad commit or a push to `main`, a worktree-per-branch workflow, and CI
-that runs exactly the same checks the hooks do. The tool grows from there.
+One library of prompt assets, versioned in git. Projects declare which ones
+they use. `hyrule apply` renders them into the files the agent already reads —
+managed regions in `CLAUDE.md`, whole files under `.claude/` — and `hyrule
+diff` tells you when a project has fallen behind or been edited locally.
 
-## Why it exists
+And, because the useful edits happen inside a project at the moment a prompt
+fails you, the path runs both ways: `hyrule promote` lifts a local fix back
+into the library so every other project gets it.
 
-Small tools accumulate ceremony — a formatter configured one way locally and
-another way in CI, a test suite that only some contributors remember to run, a
-`main` branch that anyone can push to on a bad day. This repository puts all of
-that behind one seam, `scripts/task`, and makes the wrong move fail rather than
-merely be discouraged.
+No integration is required. Claude Code reads the files it already reads.
 
-## Install
+## Status
 
-From source, with a Rust toolchain (the pinned version installs automatically
-via `rust-toolchain.toml`):
+**Early. None of the above is built yet** — the binary currently prints a
+greeting and exits. What is finished is the workflow around it: one command
+that runs every check, hooks that refuse a malformed commit or a push to
+`main`, a worktree-per-branch setup, and CI running exactly the checks the
+hooks do.
 
-```sh
-cargo install --git https://github.com/oddurs/hyrule
-```
+The design is settled and written down. See [ROADMAP.md](ROADMAP.md) — 48
+items across six milestones, generated from the files in `cairn/items`.
 
-Or clone and build:
+The nearest milestone, **v0.1**, is deliberately narrow: one asset kind carried
+all the way through, proven by hyrule managing its own `CLAUDE.md`.
+
+## Build from source
 
 ```sh
 git clone https://github.com/oddurs/hyrule
@@ -48,48 +51,35 @@ cargo build --release
 ./target/release/hyrule
 ```
 
-## Quickstart
-
-```console
-$ hyrule --help
-A command-line tool
-
-Usage: hyrule [NAME]
-
-Arguments:
-  [NAME]  Who to greet [default: world]
-
-Options:
-  -h, --help     Print help
-  -V, --version  Print version
-```
+The pinned toolchain in `rust-toolchain.toml` installs itself on first use.
 
 ## Development
 
-Run this once after cloning — it points git at the tracked hooks in `.githooks`
-and checks your environment:
+Run this once after cloning — it points git at the tracked hooks in
+`.githooks`, registers the merge driver for the backlog, and checks your
+environment:
 
 ```sh
 scripts/setup
 ```
 
 All work goes through `scripts/agent`. It gives every unit of work its own
-branch in its own worktree, so two people (or two agents) never share a
+branch in its own worktree, so two people — or two agents — never share a
 checkout:
 
 ```sh
-scripts/agent start fix/greeting-trims-whitespace   # branch + worktree, prints the path
-cd ../.worktrees/hyrule/fix/greeting-trims-whitespace
+scripts/agent start feat/render-managed-regions   # branch + worktree, prints the path
+cd ../.worktrees/hyrule/feat/render-managed-regions
 # ... edit, then:
-scripts/agent check                                 # everything CI runs
-scripts/agent commit "fix(greeting): trim surrounding whitespace"
-scripts/agent pr                                    # checks, pushes, opens the PR
-scripts/agent done                                  # after the merge: tidy up
+scripts/agent check                               # everything CI runs
+scripts/agent commit "feat(apply): render managed regions into CLAUDE.md"
+scripts/agent pr                                  # checks, pushes, opens the PR
+scripts/agent done                                # after the merge: tidy up
 ```
 
 | Command | What it does |
 |---|---|
-| `doctor` | Checks tools, auth, toolchain, hooks and tree state; reports every problem at once |
+| `doctor` | Checks tools, auth, toolchain, hooks, backlog and tree state; reports every problem at once |
 | `start <type>/<slug>` | Branches from the default branch into `../.worktrees/hyrule/<branch>` |
 | `check` | Runs `scripts/task check` |
 | `commit <msg>` | Validates the Conventional Commit message, then commits |
@@ -110,8 +100,17 @@ scripts/task build      # release build
 scripts/task check      # all of the above, in order
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch naming and commit
-conventions the hooks enforce.
+The roadmap and issues live in the repository as Markdown, managed with
+[cairn](https://github.com/oddurs/cairn):
+
+```sh
+cairn next        # what is ready to work on
+cairn board       # what is in flight
+cairn show 15     # one item in full
+```
+
+cairn is optional — the repository builds and tests without it. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for branch naming and commit conventions.
 
 ## License
 
