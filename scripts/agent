@@ -166,7 +166,11 @@ slug lowercase alphanumeric with . _ - (for example fix/0041-attach-to-a-termina
         die "origin/$default does not exist. Push the default branch first."
 
     info "creating $branch from origin/$default at $worktree"
-    git worktree add -b "$branch" "$worktree" "origin/$default"
+    # --no-track: the new branch starts from origin/<default> but must not
+    # track it, or `git status` would compare the branch against the default
+    # branch and `git pull` would pull it. `scripts/agent pr` sets the upstream
+    # to the branch's own remote ref when it pushes.
+    git worktree add --no-track -b "$branch" "$worktree" "origin/$default"
 
     git -C "$worktree" config core.hooksPath .githooks
 
