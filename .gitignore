@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Worktrees created by scripts/agent live beside the repository, but never
+# inside it. This guards against a stray relative path.
+.worktrees/
+
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~

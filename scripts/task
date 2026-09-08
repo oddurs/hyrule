@@ -1,0 +1,53 @@
+#!/bin/sh
+# The single seam between this project and its automation.
+#
+# CI, the git hooks, and scripts/agent know only these target names. Everything
+# stack-specific lives here, so there is exactly one place to change when the
+# toolchain does, and no way for CI and local checks to drift apart.
+set -eu
+
+usage() {
+    cat >&2 <<'USAGE'
+usage: scripts/task <target>
+
+targets:
+  fmt        format the tree in place
+  fmt:check  verify formatting; non-zero on drift
+  lint       lint; warnings are errors
+  test       run the full test suite
+  build      compile the release binary
+  check      fmt:check && lint && test && build
+USAGE
+    exit 64
+}
+
+run() {
+    printf '\033[1m==> %s\033[0m\n' "$*"
+    "$@"
+}
+
+fmt() { run cargo fmt --all; }
+fmt_check() { run cargo fmt --all -- --check; }
+lint() { run cargo clippy --all-targets --all-features --locked -- -D warnings; }
+test_() { run cargo test --all-targets --all-features --locked; run cargo test --doc --locked; }
+build() { run cargo build --release --locked; }
+
+[ $# -eq 1 ] || usage
+
+case "$1" in
+    fmt) fmt ;;
+    fmt:check) fmt_check ;;
+    lint) lint ;;
+    test) test_ ;;
+    build) build ;;
+    check)
+        fmt_check
+        lint
+        test_
+        build
+        ;;
+    *)
+        printf 'scripts/task: unknown target: %s\n' "$1" >&2
+        usage
+        ;;
+esac

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Formatting and lint, before anything is recorded. Kept to the two fast
+# targets; the full suite runs in pre-push.
+set -eu
+
+. "$(git rev-parse --show-toplevel)/scripts/lib.sh"
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! ./scripts/task fmt:check; then
+    err 'formatting drift. Run `scripts/task fmt`, stage the result, and commit again.'
+    exit 1
+fi
+
+if ! ./scripts/task lint; then
+    err 'lint failed. Fix the warnings and commit again.'
+    exit 1
+fi

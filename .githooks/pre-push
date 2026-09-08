@@ -1,0 +1,35 @@
+#!/bin/sh
+# Refuses a push to the default branch, and refuses to push red code.
+set -eu
+
+. "$(git rev-parse --show-toplevel)/scripts/lib.sh"
+
+default=$(default_branch)
+is_zero() { expr "$1" : '0*$' >/dev/null; }
+
+# stdin: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref local_sha remote_ref remote_sha; do
+    [ -n "${remote_ref:-}" ] || continue
+    [ "$remote_ref" = "refs/heads/$default" ] || continue
+
+    # A remote sha of all zeros means the branch does not exist there yet: this
+    # is the push that creates it when the repository is first published. Once
+    # it exists, branch protection blocks deleting it, so this is unreachable
+    # again and cannot be used to smuggle a commit onto the default branch.
+    if is_zero "$remote_sha" && ! is_zero "$local_sha"; then
+        warn "creating $default on the remote for the first time."
+        continue
+    fi
+
+    err "refusing to push to $default."
+    err "$default only ever advances through a merged pull request."
+    err 'Start work with `scripts/agent start <type>/<slug>` and open a PR.'
+    exit 1
+done
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! ./scripts/task check; then
+    err 'checks failed. A branch is green before it becomes a PR.'
+    exit 1
+fi

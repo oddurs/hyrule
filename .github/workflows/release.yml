@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Show the pinned toolchain
+        run: rustup show active-toolchain
+
+      - name: Cache cargo registry and target directory
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: scripts/task check
+        run: ./scripts/task check
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          gh release create "$TAG" --generate-notes --verify-tag
+          # Release notes are generated from commit subjects and pull request
+          # titles; strip any attribution that slipped past the commit-msg hook.
+          . ./scripts/lib.sh
+          gh release view "$TAG" --json body --jq .body > notes.md
+          if contains_attribution notes.md >/dev/null 2>&1; then
+            strip_attribution notes.md > notes.clean.md
+            gh release edit "$TAG" --notes-file notes.clean.md
+          fi

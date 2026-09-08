@@ -1,0 +1,17 @@
+#!/bin/sh
+# Run once after cloning: wire the tracked hooks up and verify the toolchain.
+set -eu
+
+. "$(git rev-parse --show-toplevel)/scripts/lib.sh"
+
+cd "$(git rev-parse --show-toplevel)"
+
+info 'wiring git hooks to .githooks'
+git config core.hooksPath .githooks
+
+if command -v rustup >/dev/null 2>&1; then
+    info 'installing the pinned toolchain and its components'
+    rustup show active-toolchain >/dev/null
+fi
+
+exec ./scripts/agent doctor

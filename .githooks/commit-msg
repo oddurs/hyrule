@@ -1,0 +1,11 @@
+#!/bin/sh
+# Rejects any commit message that is not a Conventional Commit, or that carries
+# AI or assistant attribution.
+set -eu
+
+. "$(git rev-parse --show-toplevel)/scripts/lib.sh"
+
+if ! validate_commit_message "$1"; then
+    err 'commit rejected. Fix the message and commit again.'
+    exit 1
+fi

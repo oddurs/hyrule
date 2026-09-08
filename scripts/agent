@@ -1,0 +1,335 @@
+#!/bin/sh
+# One entry point for every unit of work in this repository.
+#
+# The rules it enforces: main only ever advances through a merged pull request,
+# one unit of work gets one worktree and one branch, and a branch is green
+# before it becomes a pull request.
+set -eu
+
+. "$(git rev-parse --show-toplevel 2>/dev/null || echo .)/scripts/lib.sh"
+
+BRANCH_PATTERN='^(feat|fix|chore|docs|perf|refactor|test)/[a-z0-9][a-z0-9._-]*$'
+
+usage() {
+    cat >&2 <<'USAGE'
+usage: scripts/agent <command> [args]
+
+  doctor                  check the environment and report every problem
+  start <type>/<slug>     branch from the default branch into its own worktree
+  check                   run the full check suite
+  commit <message>        validate the message, then commit
+  pr [--draft]            check, push, and open a pull request
+  sync                    rebase this branch onto the default branch
+  done                    after the PR merges, remove the worktree and branch
+  list                    worktrees, their branches, and pull request state
+
+branch names: <type>/<slug>, type one of feat fix chore docs perf refactor test
+USAGE
+    exit 64
+}
+
+require_clean_tree() {
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+        die 'working tree has uncommitted changes. Commit or stash them first.'
+    fi
+}
+
+current_branch() {
+    git rev-parse --abbrev-ref HEAD
+}
+
+refuse_on_default() {
+    default=$(default_branch)
+    if [ "$(current_branch)" = "$default" ]; then
+        die "you are on $default. Run \`scripts/agent start <type>/<slug>\` first."
+    fi
+}
+
+# ---------------------------------------------------------------- doctor
+
+cmd_doctor() {
+    problems=0
+    report() {
+        err "$1"
+        problems=$((problems + 1))
+    }
+
+    info 'checking the environment'
+
+    for tool in git gh cargo rustup; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            printf '  ok    %s\n' "$tool"
+        else
+            report "$tool is not installed or not on PATH"
+        fi
+    done
+
+    if command -v gh >/dev/null 2>&1; then
+        if gh auth status >/dev/null 2>&1; then
+            printf '  ok    gh is authenticated\n'
+        else
+            report 'gh is not authenticated. Run `gh auth login`.'
+        fi
+    fi
+
+    if [ -f rust-toolchain.toml ] && command -v rustup >/dev/null 2>&1; then
+        if rustup component list --installed 2>/dev/null | grep -q '^rustfmt'; then
+            printf '  ok    rustfmt\n'
+        else
+            report 'rustfmt is missing. Run `rustup component add rustfmt`.'
+        fi
+        if rustup component list --installed 2>/dev/null | grep -q '^clippy'; then
+            printf '  ok    clippy\n'
+        else
+            report 'clippy is missing. Run `rustup component add clippy`.'
+        fi
+    fi
+
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        printf '  ok    inside a git repository\n'
+    else
+        report 'not inside a git repository'
+        return 1
+    fi
+
+    if git remote get-url origin >/dev/null 2>&1; then
+        printf '  ok    origin is %s\n' "$(git remote get-url origin)"
+    else
+        report 'no origin remote. Run `gh repo create --source=. --remote=origin`.'
+    fi
+
+    hooks=$(git config --get core.hooksPath 2>/dev/null || echo '')
+    if [ "$hooks" = '.githooks' ]; then
+        printf '  ok    core.hooksPath is .githooks\n'
+    else
+        git config core.hooksPath .githooks
+        printf '  ok    core.hooksPath set to .githooks\n'
+    fi
+
+    for hook in commit-msg pre-commit pre-push; do
+        if [ -x ".githooks/$hook" ]; then
+            printf '  ok    .githooks/%s is executable\n' "$hook"
+        else
+            report ".githooks/$hook is missing or not executable"
+        fi
+    done
+
+    if [ -x scripts/task ]; then
+        printf '  ok    scripts/task is executable\n'
+        for target in fmt fmt:check lint test build check; do
+            ./scripts/task 2>&1 | grep -q "^  ${target} " ||
+                report "scripts/task does not document the ${target} target"
+        done
+    else
+        report 'scripts/task is missing or not executable'
+    fi
+
+    if git diff --quiet && git diff --cached --quiet; then
+        printf '  ok    working tree is clean\n'
+    else
+        report 'working tree has uncommitted changes'
+    fi
+
+    if [ "$problems" -eq 0 ]; then
+        info 'doctor: clean'
+        return 0
+    fi
+    err "doctor: $problems problem(s) above"
+    return 1
+}
+
+# ---------------------------------------------------------------- start
+
+cmd_start() {
+    [ $# -eq 1 ] || die 'usage: scripts/agent start <type>/<slug>'
+    branch=$1
+
+    printf '%s' "$branch" | grep -q -E "$BRANCH_PATTERN" ||
+        die "invalid branch name: $branch
+branch names are <type>/<slug>, type one of feat fix chore docs perf refactor test,
+slug lowercase alphanumeric with . _ - (for example fix/0041-attach-to-a-terminal)"
+
+    default=$(default_branch)
+    worktree="$(worktrees_dir)/$branch"
+
+    if git show-ref --quiet --verify "refs/heads/$branch"; then
+        die "branch $branch already exists. Pick another name or finish it with \`scripts/agent done\`."
+    fi
+    if [ -e "$worktree" ]; then
+        die "worktree path already exists: $worktree"
+    fi
+
+    info "fetching origin"
+    git fetch origin --prune
+
+    git show-ref --quiet --verify "refs/remotes/origin/$default" ||
+        die "origin/$default does not exist. Push the default branch first."
+
+    info "creating $branch from origin/$default at $worktree"
+    git worktree add -b "$branch" "$worktree" "origin/$default"
+
+    git -C "$worktree" config core.hooksPath .githooks
+
+    printf '\n  cd %s\n\n' "$worktree"
+}
+
+# ---------------------------------------------------------------- check
+
+cmd_check() {
+    exec "$(git rev-parse --show-toplevel)/scripts/task" check
+}
+
+# ---------------------------------------------------------------- commit
+
+cmd_commit() {
+    [ $# -ge 1 ] || die 'usage: scripts/agent commit <message>'
+    message=$*
+
+    tmp=$(mktemp)
+    trap 'rm -f "$tmp"' EXIT INT TERM
+    printf '%s\n' "$message" > "$tmp"
+
+    validate_commit_message "$tmp" || die 'commit message rejected.'
+
+    if git diff --cached --quiet; then
+        die 'nothing staged. Stage your changes with `git add` first.'
+    fi
+
+    info 'committing'
+    git commit -F "$tmp"
+}
+
+# ---------------------------------------------------------------- pr
+
+sanitize_pull_request() {
+    number=$1
+    body=$(gh pr view "$number" --json body --jq .body)
+    tmp=$(mktemp)
+    printf '%s\n' "$body" > "$tmp"
+    if contains_attribution "$tmp" >/dev/null 2>&1; then
+        warn 'stripping attribution from the pull request body'
+        strip_attribution "$tmp" > "$tmp.clean"
+        gh pr edit "$number" --body-file "$tmp.clean"
+        rm -f "$tmp.clean"
+    fi
+    rm -f "$tmp"
+}
+
+cmd_pr() {
+    draft=''
+    case "${1:-}" in
+        --draft)
+            draft='--draft'
+            shift
+            ;;
+        '') ;;
+        *) die "unknown option: $1 (only --draft is accepted)" ;;
+    esac
+
+    refuse_on_default
+    branch=$(current_branch)
+    require_clean_tree
+
+    if [ -z "$(git log --oneline "origin/$(default_branch)..HEAD" 2>/dev/null)" ]; then
+        die "no commits on $branch yet. Commit something first."
+    fi
+
+    info 'running checks before opening the pull request'
+    "$(git rev-parse --show-toplevel)/scripts/task" check
+
+    info "pushing $branch"
+    git push -u origin "$branch"
+
+    if gh pr view "$branch" --json url --jq .url >/dev/null 2>&1; then
+        info 'a pull request already exists for this branch'
+    else
+        info 'opening the pull request'
+        # shellcheck disable=SC2086
+        gh pr create --fill --base "$(default_branch)" --head "$branch" $draft
+    fi
+
+    sanitize_pull_request "$branch"
+    gh pr view "$branch" --json url --jq .url
+}
+
+# ---------------------------------------------------------------- sync
+
+cmd_sync() {
+    refuse_on_default
+    require_clean_tree
+    default=$(default_branch)
+    info "fetching origin"
+    git fetch origin --prune
+    info "rebasing $(current_branch) onto origin/$default"
+    git rebase "origin/$default"
+}
+
+# ---------------------------------------------------------------- done
+
+cmd_done() {
+    branch=$(current_branch)
+    default=$(default_branch)
+    [ "$branch" != "$default" ] || die "you are on $default; there is nothing to finish."
+
+    state=$(gh pr view "$branch" --json state --jq .state 2>/dev/null || echo 'NONE')
+    case "$state" in
+        MERGED) ;;
+        NONE) die "no pull request found for $branch. Open one with \`scripts/agent pr\`." ;;
+        *) die "the pull request for $branch is $state, not MERGED. Merge it first." ;;
+    esac
+
+    primary=$(primary_worktree)
+    worktree=$(git rev-parse --show-toplevel)
+
+    if [ "$worktree" != "$primary" ]; then
+        info "removing the worktree at $worktree"
+        git -C "$primary" worktree remove --force "$worktree"
+    fi
+
+    info "deleting the local branch $branch"
+    git -C "$primary" branch -D "$branch"
+
+    info 'pruning'
+    git -C "$primary" worktree prune
+    git -C "$primary" fetch origin --prune
+
+    if [ "$worktree" != "$primary" ]; then
+        printf '\n  cd %s\n\n' "$primary"
+    fi
+}
+
+# ---------------------------------------------------------------- list
+
+cmd_list() {
+    git worktree list --porcelain | awk '
+        /^worktree /  { path = substr($0, 10) }
+        /^branch /    { branch = substr($0, 8); sub("refs/heads/", "", branch);
+                        printf "%s\t%s\n", branch, path }
+        /^detached$/  { printf "(detached)\t%s\n", path }
+    ' | while IFS="$(printf '\t')" read -r branch path; do
+        state=$(gh pr view "$branch" --json state,number --jq '"#\(.number) \(.state)"' 2>/dev/null || echo '-')
+        printf '%-40s %-14s %s\n' "$branch" "$state" "$path"
+    done
+}
+
+# ----------------------------------------------------------------
+
+[ $# -ge 1 ] || usage
+command=$1
+shift
+
+case "$command" in
+    doctor) cmd_doctor "$@" ;;
+    start) cmd_start "$@" ;;
+    check) cmd_check "$@" ;;
+    commit) cmd_commit "$@" ;;
+    pr) cmd_pr "$@" ;;
+    sync) cmd_sync "$@" ;;
+    done) cmd_done "$@" ;;
+    list) cmd_list "$@" ;;
+    -h | --help | help) usage ;;
+    *)
+        err "unknown command: $command"
+        usage
+        ;;
+esac
